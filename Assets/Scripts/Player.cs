@@ -3,6 +3,7 @@ using UnityEngine.InputSystem;
 
 public class Player : MonoBehaviour
 {
+    [Header("Movement Settings")]
     [SerializeField] float moveSpeed = 5f;
     [SerializeField] float rotateSpeed = 720f;
 
@@ -10,6 +11,7 @@ public class Player : MonoBehaviour
     Animator animator;
     Transform camTransform;
     Vector2 moveInput;
+    float verticalVelocity;
 
     void Awake()
     {
@@ -22,10 +24,13 @@ public class Player : MonoBehaviour
     {
         Vector3 inputDirection = new Vector3(moveInput.x, 0, moveInput.y).normalized;
         Vector3 moveDirection = Quaternion.AngleAxis(camTransform.eulerAngles.y, Vector3.up) * inputDirection;
-        controller.Move(moveDirection * moveSpeed * Time.deltaTime);
+        verticalVelocity = controller.isGrounded ? -2f : verticalVelocity + Physics.gravity.y * Time.deltaTime;
+        Vector3 velocity = moveDirection + Vector3.up * verticalVelocity;
+
+        controller.Move(velocity * moveSpeed * Time.deltaTime);
         animator.SetFloat("Speed", moveInput.magnitude, 0.1f, Time.deltaTime);
 
-        if (moveDirection.sqrMagnitude > 0.001f)
+        if (moveInput != Vector2.zero)
         {
             Quaternion targetRotation = Quaternion.LookRotation(moveDirection);
             transform.rotation = Quaternion.RotateTowards(transform.rotation, targetRotation, rotateSpeed * Time.deltaTime);
