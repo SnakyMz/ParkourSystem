@@ -7,12 +7,14 @@ public class Player : MonoBehaviour
     [SerializeField] float rotateSpeed = 720f;
 
     CharacterController controller;
+    Animator animator;
     Transform camTransform;
     Vector2 moveInput;
 
     void Awake()
     {
         controller = GetComponent<CharacterController>();
+        animator = GetComponent<Animator>();
         camTransform = Camera.main.transform;
     }
 
@@ -21,6 +23,7 @@ public class Player : MonoBehaviour
         Vector3 inputDirection = new Vector3(moveInput.x, 0, moveInput.y).normalized;
         Vector3 moveDirection = Quaternion.AngleAxis(camTransform.eulerAngles.y, Vector3.up) * inputDirection;
         controller.Move(moveDirection * moveSpeed * Time.deltaTime);
+        animator.SetFloat("Speed", moveInput.magnitude, 0.1f, Time.deltaTime);
 
         if (moveDirection.sqrMagnitude > 0.001f)
         {
