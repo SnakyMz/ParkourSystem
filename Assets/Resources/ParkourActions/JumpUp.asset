@@ -12,7 +12,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 536d55a92d22ff64eb24dde75779a32a, type: 3}
   m_Name: JumpUp
   m_EditorClassIdentifier: Assembly-CSharp::ParkourActionSO
-  minHeight: 0.8
+  tag: 
+  minHeight: 0.3
   maxHeight: 1.5
   matchBodyPart: 3
   weightMaskVector: {x: 0, y: 1, z: 1}

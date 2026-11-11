@@ -6,10 +6,13 @@ public class Player : MonoBehaviour
 {
     [Header("Movement Settings")]
     [SerializeField] float moveSpeed = 5f;
-    [SerializeField] float rotateSpeed = 720f;
+    [SerializeField] float rotateSpeed = 500f;
+    [SerializeField] float jumpHeight = 2.5f;
+    [SerializeField] LayerMask groundMask;
 
     [Header("Parkour Settings")]
     [SerializeField] LayerMask environmentScannerMask;
+    [SerializeField] LayerMask climbScannerMask;
     [SerializeField] Vector3 environmentRayOffset = new Vector3(0, 0.25f, 0);
     [SerializeField] float environmentRayForwardLength = 1f;
     [SerializeField] float environmentRayHeightLength = 5f;
@@ -25,6 +28,7 @@ public class Player : MonoBehaviour
     float verticalVelocity;
 
     bool inAction = false;
+    bool onGround = false;
 
     void Awake()
     {
@@ -37,8 +41,11 @@ public class Player : MonoBehaviour
 
     void Update()
     {
-        Move();
         HandleParkour();
+
+        if (inAction) return;
+
+        HandleMovement();
     }
 
     // Input Reading
@@ -48,14 +55,12 @@ public class Player : MonoBehaviour
     }
 
     // Actions
-    void Move()
+    void HandleMovement()
     {
         Vector3 inputDirection = new Vector3(moveInput.x, 0, moveInput.y).normalized;
         Vector3 moveDirection = Quaternion.AngleAxis(camTransform.eulerAngles.y, Vector3.up) * inputDirection;
-        verticalVelocity = controller.isGrounded ? -2f : Physics.gravity.y * Time.deltaTime;
+        verticalVelocity = onGround ? verticalVelocity : verticalVelocity + Physics.gravity.y * Time.deltaTime;
         Vector3 velocity = moveDirection + Vector3.up * verticalVelocity;
-
-        if (inAction) return;
 
         controller.Move(velocity * moveSpeed * Time.deltaTime);
         animator.SetFloat("Speed", moveInput.magnitude, 0.1f, Time.deltaTime);
@@ -69,76 +74,101 @@ public class Player : MonoBehaviour
 
     void HandleParkour()
     {
+        Vector3 origin = transform.position + Vector3.up * controller.radius;
+        float reach = controller.stepOffset + 0.1f;
+        onGround = Physics.SphereCast(origin, controller.radius * 0.9f, Vector3.down, out _, reach, groundMask, QueryTriggerInteraction.Ignore);
+        animator.SetBool("Grounded", onGround);
+
         if (jumpAction.WasPerformedThisFrame() && !inAction)
         {
-            // Casting a ray from the knee height of the player
-            Vector3 rayForwardOrigin = transform.position + environmentRayOffset;
-            bool isProp = Physics.Raycast(rayForwardOrigin, transform.forward, out RaycastHit hit, environmentRayForwardLength, environmentScannerMask);
+            if (!TryParkour() && !HandleClimb() && onGround)
+                verticalVelocity = jumpHeight;
+        }
+    }
 
-            Debug.DrawRay(rayForwardOrigin, transform.forward * environmentRayForwardLength, isProp ? Color.red : Color.white);
+    bool TryParkour()
+    {
+        // Casting a ray from the knee height of the player
+        Vector3 rayForwardOrigin = transform.position + environmentRayOffset;
+        if (!Physics.Raycast(rayForwardOrigin, transform.forward, out RaycastHit hit, environmentRayForwardLength, environmentScannerMask)) return false;
 
-            if (isProp)
+        // Casting a ray from the top in front of the player
+        Vector3 rayHeightOrigin = hit.point + Vector3.up * environmentRayHeightLength;
+        if (!Physics.Raycast(rayHeightOrigin, Vector3.down, out RaycastHit heightHit, environmentRayHeightLength, environmentScannerMask)) return false;
+
+        IEnumerator PlayParkourAction(string stateName, AvatarTarget bodyPart, Vector3 weightMaskVector, float matchStart, float matchEnd, float fadeTime = 0.1f)
+        {
+            inAction = true;
+            controller.enabled = false;
+            animator.applyRootMotion = true;
+            Quaternion targetRotation = Quaternion.LookRotation(-hit.normal);
+
+            try
             {
-                // Casting a ray from the top in front of the player
-                Vector3 rayHeightOrigin = hit.point + Vector3.up * environmentRayHeightLength;
-                bool canParkour = Physics.Raycast(rayHeightOrigin, Vector3.down, out RaycastHit heightHit, environmentRayHeightLength, environmentScannerMask);
+                animator.CrossFadeInFixedTime(stateName, fadeTime);
+                yield return null; // let the Animator begin the transition
 
-                Debug.DrawRay(rayHeightOrigin, Vector3.down * environmentRayHeightLength, canParkour ? Color.red : Color.white);
+                float duration = animator.GetNextAnimatorStateInfo(0).length;
+                bool matched = false;
 
-                IEnumerator PlayParkourAction(string stateName, AvatarTarget bodyPart, Vector3 weightMaskVector, float matchStart, float matchEnd, float fadeTime = 0.1f)
+                float timer = 0f;
+                while (timer < duration / animator.speed)
                 {
-                    inAction = true;
-                    controller.enabled = false;
-                    Vector3 faceDir = -hit.normal;
-                    faceDir.y = 0;
-                    Quaternion targetRotation = Quaternion.LookRotation(faceDir);
-
-                    try
+                    timer += Time.deltaTime;
+                    transform.rotation = Quaternion.RotateTowards(transform.rotation, targetRotation, rotateSpeed * Time.deltaTime);
+                    // MatchTarget is ignored while a transition is in progress
+                    if (!matched && !animator.IsInTransition(0))
                     {
-                        animator.CrossFadeInFixedTime(stateName, fadeTime);
-                        yield return null; // let the Animator begin the transition
-
-                        float duration = animator.GetNextAnimatorStateInfo(0).length;
-                        bool matched = false;
-
-                        float timer = 0f;
-                        while (timer < duration / animator.speed)
-                        {
-                            timer += Time.deltaTime;
-                            transform.rotation = Quaternion.RotateTowards(transform.rotation, targetRotation, rotateSpeed * Time.deltaTime);
-                            // MatchTarget is ignored while a transition is in progress
-                            if (!matched && !animator.IsInTransition(0))
-                            {
-                                animator.MatchTarget(heightHit.point, transform.rotation, bodyPart, new MatchTargetWeightMask(weightMaskVector, 0f), matchStart, matchEnd);
-                                matched = true;
-                            }
-                            yield return null;
-                        }
+                        animator.MatchTarget(heightHit.point, transform.rotation, bodyPart, new MatchTargetWeightMask(weightMaskVector, 0f), matchStart, matchEnd);
+                        matched = true;
                     }
-                    finally
-                    {
-                        controller.enabled = true;
-                        inAction = false;
-                    }
-                }
-
-                // Using Scriptable Objects to use specific animation based on height of the obstacle
-                foreach (ParkourActionSO parkourAction in parkourActions)
-                {
-                    if (!string.IsNullOrEmpty(parkourAction.tag) && hit.transform.CompareTag(parkourAction.tag))
-                    {
-                        StartCoroutine(PlayParkourAction(parkourAction.name, parkourAction.matchBodyPart, parkourAction.weightMaskVector, parkourAction.matchStartTime, parkourAction.matchTargetTime));
-                        break;
-                    }
-
-                    float height = heightHit.point.y - transform.position.y;
-                    if (height >= parkourAction.minHeight && height < parkourAction.maxHeight)
-                    {
-                        StartCoroutine(PlayParkourAction(parkourAction.name, parkourAction.matchBodyPart, parkourAction.weightMaskVector, parkourAction.matchStartTime, parkourAction.matchTargetTime));
-                        break;
-                    }
+                    yield return null;
                 }
             }
+            finally
+            {
+                animator.applyRootMotion = false;
+                controller.enabled = true;
+                inAction = false;
+            }
         }
+
+        // Using Scriptable Objects to use specific animation based on height of the obstacle
+        foreach (ParkourActionSO parkourAction in parkourActions)
+        {
+            if (!string.IsNullOrEmpty(parkourAction.tag) && hit.transform.CompareTag(parkourAction.tag))
+            {
+                StartCoroutine(PlayParkourAction(parkourAction.name, parkourAction.matchBodyPart, parkourAction.weightMaskVector, parkourAction.matchStartTime, parkourAction.matchTargetTime));
+                return true;
+            }
+
+            float height = heightHit.point.y - transform.position.y;
+            if (height >= parkourAction.minHeight && height < parkourAction.maxHeight)
+            {
+                StartCoroutine(PlayParkourAction(parkourAction.name, parkourAction.matchBodyPart, parkourAction.weightMaskVector, parkourAction.matchStartTime, parkourAction.matchTargetTime));
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    bool HandleClimb()
+    {
+        RaycastHit legitHit;
+        Vector3 climbRayOrigin = transform.position + Vector3.up * 1.5f;
+        Vector3 climbRayOffset = new Vector3(0, 0.18f, 0);
+
+        for (int i = 0; i < 10; i++)
+        {
+            Debug.DrawRay(climbRayOrigin + climbRayOffset * i, transform.forward);
+
+            if (Physics.Raycast(climbRayOrigin + climbRayOffset * i, transform.forward, out RaycastHit hit, environmentRayForwardLength, climbScannerMask))
+            {
+                legitHit = hit;
+                return true;
+            }
+        }
+        return false;
     }
 }
