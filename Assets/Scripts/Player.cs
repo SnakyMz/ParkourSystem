@@ -71,6 +71,7 @@ public class Player : MonoBehaviour
     {
         if (jumpAction.WasPerformedThisFrame() && !inAction)
         {
+            // Casting a ray from the knee height of the player
             Vector3 rayForwardOrigin = transform.position + environmentRayOffset;
             bool isProp = Physics.Raycast(rayForwardOrigin, transform.forward, out RaycastHit hit, environmentRayForwardLength, environmentScannerMask);
 
@@ -78,6 +79,7 @@ public class Player : MonoBehaviour
 
             if (isProp)
             {
+                // Casting a ray from the top in front of the player
                 Vector3 rayHeightOrigin = hit.point + Vector3.up * environmentRayHeightLength;
                 bool canParkour = Physics.Raycast(rayHeightOrigin, Vector3.down, out RaycastHit heightHit, environmentRayHeightLength, environmentScannerMask);
 
@@ -87,32 +89,48 @@ public class Player : MonoBehaviour
                 {
                     inAction = true;
                     controller.enabled = false;
-                    Quaternion targetRotation = Quaternion.LookRotation(-hit.normal);
+                    Vector3 faceDir = -hit.normal;
+                    faceDir.y = 0;
+                    Quaternion targetRotation = Quaternion.LookRotation(faceDir);
 
-                    animator.CrossFadeInFixedTime(stateName, fadeTime);
-                    yield return null; // let the Animator begin the transition
-
-                    float duration = animator.GetNextAnimatorStateInfo(0).length;
-
-                    float timer = 0f;
-                    while (timer < duration / animator.speed)
+                    try
                     {
-                        timer += Time.deltaTime;
-                        transform.rotation = Quaternion.RotateTowards(transform.rotation, targetRotation, rotateSpeed * Time.deltaTime);
-                        // MatchTarget is ignored while a transition is in progress,
-                        // so keep trying until it takes
-                        if (!animator.IsInTransition(0) && !animator.isMatchingTarget)
+                        animator.CrossFadeInFixedTime(stateName, fadeTime);
+                        yield return null; // let the Animator begin the transition
+
+                        float duration = animator.GetNextAnimatorStateInfo(0).length;
+                        bool matched = false;
+
+                        float timer = 0f;
+                        while (timer < duration / animator.speed)
                         {
-                            animator.MatchTarget(heightHit.point, transform.rotation, bodyPart, new MatchTargetWeightMask(weightMaskVector, 0f), matchStart, matchEnd);
+                            timer += Time.deltaTime;
+                            transform.rotation = Quaternion.RotateTowards(transform.rotation, targetRotation, rotateSpeed * Time.deltaTime);
+                            // MatchTarget is ignored while a transition is in progress
+                            if (!matched && !animator.IsInTransition(0))
+                            {
+                                animator.MatchTarget(heightHit.point, transform.rotation, bodyPart, new MatchTargetWeightMask(weightMaskVector, 0f), matchStart, matchEnd);
+                                matched = true;
+                            }
+                            yield return null;
                         }
-                        yield return null;
                     }
-                    controller.enabled = true;
-                    inAction = false;
+                    finally
+                    {
+                        controller.enabled = true;
+                        inAction = false;
+                    }
                 }
 
+                // Using Scriptable Objects to use specific animation based on height of the obstacle
                 foreach (ParkourActionSO parkourAction in parkourActions)
                 {
+                    if (!string.IsNullOrEmpty(parkourAction.tag) && hit.transform.CompareTag(parkourAction.tag))
+                    {
+                        StartCoroutine(PlayParkourAction(parkourAction.name, parkourAction.matchBodyPart, parkourAction.weightMaskVector, parkourAction.matchStartTime, parkourAction.matchTargetTime));
+                        break;
+                    }
+
                     float height = heightHit.point.y - transform.position.y;
                     if (height >= parkourAction.minHeight && height < parkourAction.maxHeight)
                     {

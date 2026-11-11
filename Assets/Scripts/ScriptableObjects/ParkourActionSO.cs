@@ -3,6 +3,7 @@ using UnityEngine;
 [CreateAssetMenu(fileName = "ParkourActionSO", menuName = "Scriptable Objects/ParkourActionSO")]
 public class ParkourActionSO : ScriptableObject
 {
+    public string tag = null;
     public float minHeight;
     public float maxHeight;
     public AvatarTarget matchBodyPart;
